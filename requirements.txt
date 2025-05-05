@@ -1,5 +1,10 @@
 fastapi
 uvicorn
-transformers
-torch
+pandas
+numpy
+pdfplumber
+firebase-admin
+scikit-learn
+joblib
 pydantic
+python-multipart
