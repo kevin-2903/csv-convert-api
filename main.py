@@ -488,11 +488,7 @@ def parse_csv_statement(csv_file: bytes) -> List[Dict[str, Any]]:
             # Description columns
             'description': ['description', 'narration', 'particulars', 'details', 'transaction_details'],
             # Amount columns
-            'amount': ['amount', 'transaction_amount'],
-            # Debit columns
-            'debit': ['debit', 'debit_amount', 'withdrawal'],
-            # Credit columns
-            'credit': ['credit', 'credit_amount', 'deposit'],
+            'amount': ['amount', 'transaction_amount', 'debit', 'credit'],
             # Type columns (optional)
             'type': ['type', 'transaction_type', 'dr/cr']
         }
