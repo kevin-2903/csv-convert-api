@@ -304,6 +304,8 @@ def parse_pdf_statement(pdf_file: bytes) -> List[Dict[str, Any]]:
         bank_format = "hdfc"
     elif "KOTAK MAHINDRA BANK" in text.upper():
         bank_format = "kotak"
+    elif "STATE BANK OF INDIA" in text.upper():
+        bank_format = "sbi"
 
     transactions = []
 
@@ -370,6 +372,51 @@ def parse_pdf_statement(pdf_file: bytes) -> List[Dict[str, Any]]:
             except Exception as e:
                 print(f"Error parsing Kotak transaction: {e}")
                 continue
+            
+    elif bank_format == "sbi":
+        # SBI Bank format parsing
+        sbi_pattern = r'(\d{2} \w{3} \d{4})\s+(.+?)\s+Ref No/\s*Cheque No\s+(\d+)?\s+([\d,]+)\s+([\d,]+)\s+([\d,]+)'
+        matches = re.finditer(sbi_pattern, text)
+        
+        for match in matches:
+            try:
+                date_str = match.group(1)
+                description = match.group(2).strip()
+                ref_no = match.group(3) or ""
+                debit = match.group(4)
+                credit = match.group(5)
+                balance = match.group(6)
+                                # Determine amount and transaction type
+                if debit and float(debit.replace(',', '')) > 0:
+                    amount = -float(debit.replace(',', ''))
+                    transaction_type = "expense"
+                elif credit and float(credit.replace(',', '')) > 0:
+                    amount = float(credit.replace(',', ''))
+                    transaction_type = "income"
+                else:
+                    amount = 0.0
+                    transaction_type = "unknown"
+                # Standardize date format
+                try:
+                    date_obj = datetime.strptime(date_str, "%d %b %Y")
+                    date_str = date_obj.strftime('%Y-%m-%d')
+                except:
+                    pass
+                # Predict category
+                category, _ = category_predictor.predict_category(description, amount)
+                transactions.append({
+                    'date': date_str,
+                    'description': description,
+                    'amount': abs(amount),
+                    'category': category,
+                    'transaction_type': transaction_type
+                })
+            except Exception as e:
+                print(f"Error parsing SBI transaction: {e}")
+                continue
+
+
+    
     else:
         # Generic parsing pattern
         transaction_patterns = [
