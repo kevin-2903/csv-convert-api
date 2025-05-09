@@ -506,11 +506,14 @@ def parse_csv_statement(csv_file: bytes) -> List[Dict[str, Any]]:
         if not all(col in column_map for col in required_cols):
             raise ValueError(f"CSV is missing required columns. Found: {df.columns.tolist()}")
         
-        # Determine amount column or compute from debit and credit
+        # Handle amount columns - might be in separate debit/credit columns
         if 'amount' not in column_map:
-            if 'debit' in column_map and 'credit' in column_map:
-                # Create a new amount column: credit - debit
-                df['amount'] = df[column_map['credit']].fillna(0) - df[column_map['debit']].fillna(0)
+            debit_col = next((col for col in df.columns if 'debit' in col), None)
+            credit_col = next((col for col in df.columns if 'credit' in col), None)
+            
+            if debit_col and credit_col:
+                # Create a new amount column
+                df['amount'] = df[credit_col].fillna(0) - df[debit_col].fillna(0)
                 column_map['amount'] = 'amount'
             else:
                 raise ValueError("Could not find amount, debit, or credit columns")
@@ -540,25 +543,13 @@ def parse_csv_statement(csv_file: bytes) -> List[Dict[str, Any]]:
                 # Get amount
                 amount = float(row[column_map['amount']])
                 
-                # Determine transaction type and adjust amount sign
+                # Get transaction type if available, otherwise infer from amount
                 if 'type' in column_map:
                     type_value = str(row[column_map['type']]).lower()
                     if 'dr' in type_value or 'debit' in type_value:
                         amount = -abs(amount)
                     elif 'cr' in type_value or 'credit' in type_value:
                         amount = abs(amount)
-                else:
-                    # If no type column, infer from debit/credit or amount sign
-                    if 'debit' in column_map and 'credit' in column_map:
-                        debit_val = row[column_map['debit']]
-                        credit_val = row[column_map['credit']]
-                        if pd.notna(debit_val) and debit_val != 0:
-                            amount = -abs(amount)
-                        elif pd.notna(credit_val) and credit_val != 0:
-                            amount = abs(amount)
-                    else:
-                        # Fallback: infer from amount sign
-                        amount = amount
                 
                 # Predict category and transaction type
                 category, transaction_type = category_predictor.predict_category(description, amount)
