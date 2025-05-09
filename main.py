@@ -298,68 +298,129 @@ def parse_pdf_statement(pdf_file: bytes) -> List[Dict[str, Any]]:
     """Parse a bank statement PDF and extract transactions"""
     text = extract_text_from_pdf(pdf_file)
     
-    # This is a simplified approach - in production, you would need more robust patterns
-    # for different bank statement formats
-    
-    # Common patterns for transaction entries in bank statements
-    # Format: date, description, debit amount, credit amount
-    transaction_patterns = [
-        # Pattern 1: DD/MM/YYYY or DD-MM-YYYY followed by description and amount
-        r'(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\s+([A-Za-z0-9\s\.,&\-/]+?)\s+((?:\d+,)*\d+\.\d{2})',
-        
-        # Pattern 2: YYYY-MM-DD format
-        r'(\d{4}-\d{2}-\d{2})\s+([A-Za-z0-9\s\.,&\-/]+?)\s+((?:\d+,)*\d+\.\d{2})',
-        
-        # Add more patterns as needed for different bank formats
-    ]
-    
+    # Detect bank format
+    bank_format = "unknown"
+    if "HDFC BANK" in text.upper():
+        bank_format = "hdfc"
+    elif "KOTAK MAHINDRA BANK" in text.upper():
+        bank_format = "kotak"
+
     transactions = []
-    
-    for pattern in transaction_patterns:
+
+    if bank_format == "hdfc":
+        # HDFC Bank format
+        pattern = r'(\d{2}/\d{2}/\d{2})\s+(.+?)\s{2,}([A-Z0-9]+)?\s+(\d{2}/\d{2}/\d{2})\s+([\d,]+\.\d{2})?\s+([\d,]+\.\d{2})?\s+([\d,]+\.\d{2})'
         matches = re.finditer(pattern, text)
         for match in matches:
             try:
                 date_str = match.group(1)
                 description = match.group(2).strip()
-                amount_str = match.group(3).replace(',', '')
-                
-                # Try to determine if it's a debit or credit
-                # This is simplified - real implementation would need to check context
-                is_debit = True
-                if "credit" in description.lower() or "deposit" in description.lower():
-                    is_debit = False
-                
-                amount = float(amount_str)
-                if is_debit:
-                    amount = -amount
-                
-                # Standardize date format
-                try:
-                    # Try different date formats
-                    for fmt in ('%d/%m/%Y', '%d-%m-%Y', '%Y-%m-%d', '%d/%m/%y', '%d-%m-%y'):
-                        try:
-                            date_obj = datetime.strptime(date_str, fmt)
-                            date_str = date_obj.strftime('%Y-%m-%d')
-                            break
-                        except ValueError:
-                            continue
-                except Exception:
-                    # If date parsing fails, keep original
-                    pass
-                
-                # Predict category and transaction type
-                category, transaction_type = category_predictor.predict_category(description, amount)
-                
+                withdrawal = match.group(5)
+                deposit = match.group(6)
+
+                # Transaction amount
+                if withdrawal:
+                    amount = -float(withdrawal.replace(',', ''))
+                    txn_type = "expense"
+                elif deposit:
+                    amount = float(deposit.replace(',', ''))
+                    txn_type = "income"
+                else:
+                    amount = 0.0
+                    txn_type = "unknown"
+
+                date_str = datetime.strptime(date_str, "%d/%m/%y").strftime('%Y-%m-%d')
+                category, _ = category_predictor.predict_category(description, amount)
+
                 transactions.append({
                     'date': date_str,
                     'description': description,
-                    'amount': abs(amount),  # Store absolute amount
+                    'amount': abs(amount),
                     'category': category,
-                    'transaction_type': transaction_type
+                    'transaction_type': txn_type
                 })
             except Exception as e:
-                print(f"Error parsing transaction: {e}")
+                print(f"Error parsing HDFC transaction: {e}")
                 continue
+
+    elif bank_format == "kotak":
+        # Kotak Bank format
+        pattern = r'(\d{2}-\d{2}-\d{4})\s+(.+?)\s+[A-Z0-9\-]+?\s+([\d,]+\.\d{2})\(?(Dr|Cr)\)?\s+([\d,]+\.\d{2})\(Cr\)'
+        matches = re.finditer(pattern, text)
+        for match in matches:
+            try:
+                date_str = datetime.strptime(match.group(1), "%d-%m-%Y").strftime("%Y-%m-%d")
+                description = match.group(2).strip()
+                amount = float(match.group(3).replace(',', ''))
+                drcr = match.group(4).lower()
+                txn_type = "expense" if drcr == "dr" else "income"
+
+                if txn_type == "expense":
+                    amount = -amount
+
+                category, _ = category_predictor.predict_category(description, amount)
+
+                transactions.append({
+                    'date': date_str,
+                    'description': description,
+                    'amount': abs(amount),
+                    'category': category,
+                    'transaction_type': txn_type
+                })
+            except Exception as e:
+                print(f"Error parsing Kotak transaction: {e}")
+                continue
+    else:
+        # Generic parsing pattern
+        transaction_patterns = [
+            # Pattern 1: DD/MM/YYYY or DD-MM-YYYY followed by description and amount
+            r'(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\s+([A-Za-z0-9\s\.,&\-/]+?)\s+((?:\d+,)*\d+\.\d{2})',
+            
+            # Pattern 2: YYYY-MM-DD format
+            r'(\d{4}-\d{2}-\d{2})\s+([A-Za-z0-9\s\.,&\-/]+?)\s+((?:\d+,)*\d+\.\d{2})',
+        ]
+        
+        for pattern in transaction_patterns:
+            matches = re.finditer(pattern, text)
+            for match in matches:
+                try:
+                    date_str = match.group(1)
+                    description = match.group(2).strip()
+                    amount_str = match.group(3).replace(',', '')
+                    
+                    # Try to determine if it's a debit or credit
+                    is_debit = True
+                    if "credit" in description.lower() or "deposit" in description.lower():
+                        is_debit = False
+                    
+                    amount = float(amount_str)
+                    if is_debit:
+                        amount = -amount
+                    
+                    # Standardize date format
+                    try:
+                        for fmt in ('%d/%m/%Y', '%d-%m-%Y', '%Y-%m-%d', '%d/%m/%y', '%d-%m-%y'):
+                            try:
+                                date_obj = datetime.strptime(date_str, fmt)
+                                date_str = date_obj.strftime('%Y-%m-%d')
+                                break
+                            except ValueError:
+                                continue
+                    except Exception:
+                        pass
+                    
+                    category, transaction_type = category_predictor.predict_category(description, amount)
+                    
+                    transactions.append({
+                        'date': date_str,
+                        'description': description,
+                        'amount': abs(amount),
+                        'category': category,
+                        'transaction_type': transaction_type
+                    })
+                except Exception as e:
+                    print(f"Error parsing generic transaction: {e}")
+                    continue
     
     return transactions
 
@@ -380,7 +441,11 @@ def parse_csv_statement(csv_file: bytes) -> List[Dict[str, Any]]:
             # Description columns
             'description': ['description', 'narration', 'particulars', 'details', 'transaction_details'],
             # Amount columns
-            'amount': ['amount', 'transaction_amount', 'debit', 'credit'],
+            'amount': ['amount', 'transaction_amount'],
+            # Debit columns
+            'debit': ['debit', 'debit_amount', 'withdrawal'],
+            # Credit columns
+            'credit': ['credit', 'credit_amount', 'deposit'],
             # Type columns (optional)
             'type': ['type', 'transaction_type', 'dr/cr']
         }
@@ -398,14 +463,11 @@ def parse_csv_statement(csv_file: bytes) -> List[Dict[str, Any]]:
         if not all(col in column_map for col in required_cols):
             raise ValueError(f"CSV is missing required columns. Found: {df.columns.tolist()}")
         
-        # Handle amount columns - might be in separate debit/credit columns
+        # Determine amount column or compute from debit and credit
         if 'amount' not in column_map:
-            debit_col = next((col for col in df.columns if 'debit' in col), None)
-            credit_col = next((col for col in df.columns if 'credit' in col), None)
-            
-            if debit_col and credit_col:
-                # Create a new amount column
-                df['amount'] = df[credit_col].fillna(0) - df[debit_col].fillna(0)
+            if 'debit' in column_map and 'credit' in column_map:
+                # Create a new amount column: credit - debit
+                df['amount'] = df[column_map['credit']].fillna(0) - df[column_map['debit']].fillna(0)
                 column_map['amount'] = 'amount'
             else:
                 raise ValueError("Could not find amount, debit, or credit columns")
@@ -435,13 +497,25 @@ def parse_csv_statement(csv_file: bytes) -> List[Dict[str, Any]]:
                 # Get amount
                 amount = float(row[column_map['amount']])
                 
-                # Get transaction type if available, otherwise infer from amount
+                # Determine transaction type and adjust amount sign
                 if 'type' in column_map:
                     type_value = str(row[column_map['type']]).lower()
                     if 'dr' in type_value or 'debit' in type_value:
                         amount = -abs(amount)
                     elif 'cr' in type_value or 'credit' in type_value:
                         amount = abs(amount)
+                else:
+                    # If no type column, infer from debit/credit or amount sign
+                    if 'debit' in column_map and 'credit' in column_map:
+                        debit_val = row[column_map['debit']]
+                        credit_val = row[column_map['credit']]
+                        if pd.notna(debit_val) and debit_val != 0:
+                            amount = -abs(amount)
+                        elif pd.notna(credit_val) and credit_val != 0:
+                            amount = abs(amount)
+                    else:
+                        # Fallback: infer from amount sign
+                        amount = amount
                 
                 # Predict category and transaction type
                 category, transaction_type = category_predictor.predict_category(description, amount)
