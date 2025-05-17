@@ -1,6 +1,3 @@
-# 1. Install dependencies (uncomment if needed)
-!apt-get install -y poppler-utils
-!pip install pandas tabula-py PyMuPDF pdfplumber openpyxl pytesseract pdf2image
 
 # 2. Import Libraries
 import os
